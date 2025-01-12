@@ -8,6 +8,10 @@ using System.Data;
 using System.Data.SqlClient;
 using System.Configuration;
 using System.Text.RegularExpressions;
+using System.Data.Common;
+using System.Configuration.Provider;
+using System.Collections.Specialized;
+using System.Diagnostics;
 
 
 namespace ADOdotNET_First_Project
@@ -15,8 +19,10 @@ namespace ADOdotNET_First_Project
     internal class Program
     {
 
-        static string connStr = @"Data Source=DESKTOP-ET8RJ3S;Initial Catalog=Library;Integrated Security=True;Connect Timeout=30";
-        static SqlConnection conn = new SqlConnection(connStr);
+        //static string connStr = @"Data Source=DESKTOP-ET8RJ3S;Initial Catalog=Library;Integrated Security=True;Connect Timeout=30";
+        //static SqlConnection conn = new SqlConnection(connStr);
+        static DbConnection conn = null;
+        static DbProviderFactory fact = null;
 
         private enum Tasks
         {
@@ -41,17 +47,41 @@ namespace ADOdotNET_First_Project
             //conn = new SqlConnection(connStr);
              //conn.ConnectionString = ConfigurationManager.ConnectionStrings["MyConnString"].ConnectionString;
         }
+        private static string GetConnectionStringVByProvider(string providerName)
+        {
+            ConnectionStringSettingsCollection settings = ConfigurationManager.ConnectionStrings;
+            string returnValue = "";
+            if (settings != null)
+            {
+                foreach (ConnectionStringSettings cs in settings)
+                {
+                    //if (cs.ProviderName == providerName)
+                    //{
+                    //    returnValue = cs.ConnectionString;
+                    //    break;
+                    //}
+                    //Костыль, проект не видит содержимое App.config
+                    if (cs.ProviderName == "System.Data.SqlClient")
+                    {
+                        returnValue = "Data Source=DESKTOP-ET8RJ3S;Initial Catalog=Library;Integrated Security=True;Connect Timeout=3";
+                            break;
+                    }
 
-        public static void Insert()
+                }
+            }
+            return returnValue;
+        }
+
+        public static async void Insert()
         {
             try
             {
                 conn.Open();
 
                 string insertStr = "INSERT INTO Authors (FirstName, LastName) VALUES ('Roger', 'Federer')";
-                SqlCommand insertCmd = new SqlCommand(insertStr, conn);
+                SqlCommand insertCmd = new SqlCommand(insertStr, conn as SqlConnection);
 
-                insertCmd.ExecuteNonQuery();
+                await insertCmd.ExecuteNonQueryAsync();
 
                 conn.Close();
             }
@@ -61,17 +91,17 @@ namespace ADOdotNET_First_Project
             }
            
         }
-        public static void SelectAuthors()
+        public static async void SelectAuthors()
         {
             string sqlSelect = "SELECT * FROM Authors";
             try
             {
                 conn.Open();
-                SqlCommand cmd = new SqlCommand(sqlSelect, conn);
+                SqlCommand cmd = new SqlCommand(sqlSelect, conn as SqlConnection);
 
                 var reader = cmd.ExecuteReader();
                 int lineCount = 0;
-                while (reader.Read())
+                while (await reader.ReadAsync())
                 {
                     if (lineCount ==0)
                     {
@@ -99,7 +129,7 @@ namespace ADOdotNET_First_Project
         }
 
 
-        public static void selectId()
+        public async static void selectId()
         {
             using (conn = new SqlConnection(conn.ConnectionString))
             {
@@ -112,32 +142,41 @@ namespace ADOdotNET_First_Project
                 param1.Value = id;
 
                 cms.Parameters.Add(param1);
-                cms.ExecuteNonQuery();
+                await cms.ExecuteNonQueryAsync();
             }
         }
 
 
         static void Main(string[] args)
         {
-
-            //Insert();
-            //SelectAuthors();
-
-
             try
             {
-                
+
+                Console.WriteLine("Выберите провайдера: ");
+                DataTable table = DbProviderFactories.GetFactoryClasses();
+                short i = 0;
+                foreach (DataRow row in table.Rows)
+                {
+                    Console.WriteLine(i.ToString() + "- " + row["InvariantName"]);
+                    i++;
+                }
+                byte providerNumber = Convert.ToByte(Console.ReadLine());
+
+                string providerName = table.Rows[providerNumber]["InvariantName"].ToString();
+                fact = DbProviderFactories.GetFactory(providerName);
+                conn = fact.CreateConnection();
+                string connectionString = GetConnectionStringVByProvider(providerName);
+                conn.ConnectionString = connectionString;
+
+                Console.WriteLine("Строка подключения: " + providerName);
+
                 conn.Open();
                 Console.WriteLine("Подключение к БД успешно установлено!");
-                conn.Close();//для работы 3 и 4 заданий
+                conn.Close();
 
-
-                //Console.WriteLine("Нажмите любую клавишу для отключения от БД.");
-                //Console.ReadKey();
             }
             catch (SqlException ex)
-            {
-                
+            {                
                 Console.WriteLine("Ошибка подключения к БД: " + ex.Message);
             }
             finally
@@ -181,8 +220,7 @@ namespace ADOdotNET_First_Project
                 switch (taskNum)
                 {
                     case Tasks.ALL:
-                    {
-                        
+                    {                        
                         string sqlInput = @"SELECT *
                                             FROM Students";
                         string[] sqlOutput = { "Id", "FullName", "AverageGrade", "GroupName", "MinSubjectName", "MaxSubjectName" };
@@ -300,17 +338,17 @@ namespace ADOdotNET_First_Project
         }
         private static string sqlStrCommand = "";
 
-        private static void GetInfo(string sqlInput, string[] mSqlOutput)
+        private static async void GetInfo(string sqlInput, string[] mSqlOutput)
         {
             sqlStrCommand = sqlInput;
-
+            var stopwatch = Stopwatch.StartNew();
             try
             {
                 conn.Open();
-                SqlCommand cmd = new SqlCommand(sqlStrCommand, conn);
-                var reader = cmd.ExecuteReader();
+                SqlCommand cmd = new SqlCommand(sqlStrCommand, conn as SqlConnection);
+                var reader = await cmd.ExecuteReaderAsync();
                 int lineCount = 0;
-                while (reader.Read())
+                while (await reader.ReadAsync())
                 {
                     if (lineCount == 0)
                     {
@@ -337,10 +375,12 @@ namespace ADOdotNET_First_Project
             finally
             {
                 conn.Close();
+                stopwatch.Stop();
+                Console.WriteLine($"Время выполнения запроса: {stopwatch.ElapsedMilliseconds} ms");
             }
         } 
 
-        private static void showMinGradesMoreThanTarget()
+        private static async void showMinGradesMoreThanTarget()
         {
             sqlStrCommand = @"SELECT Id, FullName
                                 FROM Students
@@ -349,7 +389,7 @@ namespace ADOdotNET_First_Project
             try
             {
                 conn.Open();
-                SqlCommand cmd = new SqlCommand(sqlStrCommand, conn);
+                SqlCommand cmd = new SqlCommand(sqlStrCommand, conn as SqlConnection);
                 SqlParameter param1 = new SqlParameter();
                 param1.ParameterName = "@parMinGrade";
                 Console.WriteLine("Введите минимальную оценку: ");
@@ -357,9 +397,9 @@ namespace ADOdotNET_First_Project
                 param1.Value = grade;
 
                 cmd.Parameters.Add(param1);
-                var reader = cmd.ExecuteReader();
+                var reader = await cmd.ExecuteReaderAsync();
                 int lineCount = 0;
-                while (reader.Read())
+                while (await reader.ReadAsync())
                 {
                     if (lineCount == 0)
                     {
